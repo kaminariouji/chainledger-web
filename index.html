@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChainLedger Web — export any wallet to Koinly CSV, in your browser</title>
+<meta name="description" content="Paste a wallet address and download a Koinly-ready CSV. Runs entirely in your browser: no account, no API key, no server, no upload.">
+<style>
+  :root{
+    --bg:#0B0F14; --panel:#111821; --line:#1E2A36; --text:#E6EDF3; --muted:#8FA6B8;
+    --cyan:#38BDF8; --cyan-dim:#0EA5E9; --ok:#34D399; --warn:#FBBF24; --err:#F87171;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:860px;margin:0 auto;padding:48px 24px 80px}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:40px}
+  .mark{
+    width:42px;height:42px;border-radius:11px;flex:0 0 auto;
+    background:linear-gradient(140deg,#38BDF8,#0EA5E9 55%,#0369A1);
+    display:flex;align-items:center;justify-content:center;
+    font-weight:800;font-size:19px;color:#04121C;letter-spacing:-1px;
+  }
+  .brand{font-size:14px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+  h1{font-size:40px;line-height:1.1;letter-spacing:-1.2px;margin:0 0 14px;font-weight:800}
+  h1 span{color:var(--cyan)}
+  .lede{color:var(--muted);font-size:17px;margin:0 0 34px;max-width:640px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:26px}
+  label{display:block;font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  input,select{
+    width:100%;padding:13px 14px;border-radius:10px;border:1px solid var(--line);
+    background:#0B1219;color:var(--text);font-size:15px;font-family:inherit;
+  }
+  input:focus,select:focus{outline:none;border-color:var(--cyan-dim)}
+  .row{display:grid;grid-template-columns:1fr 200px;gap:14px;margin-bottom:16px}
+  button{
+    width:100%;padding:14px 18px;border-radius:10px;border:0;cursor:pointer;
+    background:linear-gradient(180deg,#38BDF8,#0EA5E9);color:#04121C;
+    font-size:16px;font-weight:800;font-family:inherit;
+  }
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--text);font-weight:700}
+  #status{margin-top:18px;font-size:14px;color:var(--muted);min-height:22px;white-space:pre-wrap}
+  #status.err{color:var(--err)} #status.ok{color:var(--ok)}
+  .out{margin-top:18px;display:none}
+  .out.show{display:block}
+  .stats{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:16px;font-size:14px;color:var(--muted)}
+  .stats b{color:var(--text);font-size:20px;display:block;font-weight:800}
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  details{margin-top:34px;border-top:1px solid var(--line);padding-top:22px}
+  summary{cursor:pointer;font-weight:700;color:var(--muted);font-size:14px}
+  details p,details li{color:var(--muted);font-size:14px}
+  .fine{color:#5F7488;font-size:13px;margin-top:26px}
+  a{color:var(--cyan)}
+  @media(max-width:620px){.row{grid-template-columns:1fr}h1{font-size:30px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="mark">CL</div>
+    <div class="brand">ChainLedger</div>
+  </header>
+
+  <h1>Wallet to tax CSV,<br><span>in your browser.</span></h1>
+  <p class="lede">Paste an address. Get a Koinly-ready CSV. Nothing is uploaded — the request goes straight from this tab to a public block explorer, and the file is built on your machine.</p>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="addr">Wallet address</label>
+        <input id="addr" placeholder="0x…" autocomplete="off" spellcheck="false">
+      </div>
+      <div>
+        <label for="chain">Chain</label>
+        <select id="chain">
+          <option value="base">Base</option>
+          <option value="ethereum">Ethereum</option>
+          <option value="optimism">Optimism</option>
+          <option value="polygon">Polygon</option>
+          <option value="arbitrum">Arbitrum</option>
+        </select>
+      </div>
+    </div>
+    <button id="go">Export to CSV</button>
+    <div id="status"></div>
+
+    <div class="out" id="out">
+      <div class="stats">
+        <div><b id="n-rows">0</b>rows</div>
+        <div><b id="n-tok">0</b>token transfers</div>
+        <div><b id="n-native">0</b>native transfers</div>
+      </div>
+      <div class="actions">
+        <button id="dl-koinly">Download Koinly CSV</button>
+        <button id="dl-raw" class="ghost">Download raw CSV</button>
+      </div>
+    </div>
+  </div>
+
+  <details>
+    <summary>What this does and does not do</summary>
+    <p><b>Does:</b> reads ERC-20 <code>Transfer</code> events and native transactions for one address on one chain, from that chain's public Blockscout instance, and writes Koinly and raw CSV.</p>
+    <p><b>Does not:</b> classify your trades, compute cost basis, or handle multiple wallets at once. Native transfers only appear on chains whose explorer exposes them. Anything ambiguous is left unlabelled rather than guessed.</p>
+    <p><b>Privacy:</b> there is no backend. Your address is sent only to the explorer you pick, from your own IP, exactly as if you opened that explorer yourself. No analytics, no cookies, no storage.</p>
+    <p><b>Speed:</b> up to 20 pages of history per run. Very active wallets will be truncated; use the CLI for full history.</p>
+  </details>
+
+  <p class="fine">Need many wallets, every chain, and full history? The <a href="https://ko-fi.com/s/f8dcae9582" target="_blank" rel="noopener">$19 command-line version</a> does that offline. This page stays free.</p>
+</div>
+
+<script>
+const EXPLORERS = {
+  base:     'https://base.blockscout.com/api/v2',
+  ethereum: 'https://eth.blockscout.com/api/v2',
+  optimism: 'https://optimism.blockscout.com/api/v2',
+  polygon:  'https://polygon.blockscout.com/api/v2',
+  arbitrum: 'https://arbitrum.blockscout.com/api/v2',
+};
+const NATIVE = { base:'ETH', ethereum:'ETH', optimism:'ETH', polygon:'POL', arbitrum:'ETH' };
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status');
+function say(msg, cls='') { statusEl.className = cls; statusEl.textContent = msg; }
+
+function fmtAmount(valueStr, decimals) {
+  let v = BigInt(valueStr || '0');
+  const d = BigInt(decimals || 18);
+  const base = 10n ** d;
+  const whole = v / base;
+  const frac = (v % base).toString().padStart(Number(d), '0').replace(/0+$/, '');
+  return frac ? whole.toString() + '.' + frac : whole.toString();
+}
+
+async function pages(path, maxPages = 20) {
+  let params = null, all = [];
+  for (let i = 0; i < maxPages; i++) {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    const res = await fetch(path + qs);
+    if (!res.ok) throw new Error('explorer returned HTTP ' + res.status);
+    const j = await res.json();
+    all = all.concat(j.items || []);
+    if (!j.next_page_params) break;
+    params = j.next_page_params;
+  }
+  return all;
+}
+
+function iso(ts) {
+  const d = new Date(ts);
+  return isNaN(d) ? '' : d.toISOString().replace('.000Z', 'Z');
+}
+
+function koinlyRow(r) {
+  const sent = r.dir === 'out' ? r.amount : '';
+  const sentCur = r.dir === 'out' ? r.asset : '';
+  const recv = r.dir === 'in' ? r.amount : '';
+  const recvCur = r.dir === 'in' ? r.asset : '';
+  return [r.datetime, sent, sentCur, recv, recvCur, '', '', '', '', '', r.note || '', r.hash].join(',');
+}
+
+const RAW_HEAD = 'chain,txHash,datetime,type,asset,contract,decimals,amount,direction,from,to,explorer';
+
+function csvEscape(v) {
+  const s = String(v == null ? '' : v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+async function run() {
+  const addr = $('addr').value.trim();
+  const chain = $('chain').value;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) { say('That does not look like an EVM address (0x + 40 hex characters).', 'err'); return; }
+
+  $('go').disabled = true;
+  $('out').classList.remove('show');
+  say('Reading ' + chain + '…');
+
+  const base = EXPLORERS[chain];
+  const lower = addr.toLowerCase();
+  const rows = [];
+
+  try {
+    const tokenItems = await pages(`${base}/addresses/${addr}/token-transfers`);
+    for (const t of tokenItems) {
+      const dec = t.token?.decimals ?? 18;
+      const val = t.total?.value ?? '0';
+      const from = t.from?.hash || '';
+      const to = t.to?.hash || '';
+      rows.push({
+        datetime: iso(t.timestamp),
+        type: 'token',
+        asset: t.token?.symbol || 'TOKEN',
+        contract: t.token?.address_hash || t.token?.address || '',
+        decimals: dec,
+        amount: fmtAmount(val, dec),
+        dir: to.toLowerCase() === lower ? 'in' : 'out',
+        from, to,
+        hash: t.transaction_hash || t.hash || '',
+        note: 'token transfer',
+      });
+    }
+    say('Token transfers: ' + rows.length + '. Reading native transactions…');
+
+    let nativeCount = 0;
+    try {
+      const txItems = await pages(`${base}/addresses/${addr}/transactions`);
+      for (const t of txItems) {
+        const from = t.from?.hash || '';
+        const to = t.to?.hash || '';
+        const val = BigInt(t.value || '0');
+        if (val === 0n) continue;
+        rows.push({
+          datetime: iso(t.timestamp),
+          type: 'native',
+          asset: NATIVE[chain] || 'ETH',
+          contract: '',
+          decimals: 18,
+          amount: fmtAmount(t.value, 18),
+          dir: from.toLowerCase() === lower ? 'out' : 'in',
+          from, to,
+          hash: t.hash || '',
+          note: 'native transfer',
+        });
+        nativeCount++;
+      }
+    } catch (e) {
+      say('Token transfers: ' + rows.length + '. Native transfers unavailable on this explorer (' + e.message + ').', '');
+    }
+
+    rows.sort((a, b) => (a.datetime < b.datetime ? -1 : a.datetime > b.datetime ? 1 : 0));
+
+    const koinly = ['Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Fee Currency,Net Worth Amount,Net Worth Currency,Label,Description,TxHash']
+      .concat(rows.map(koinlyRow)).join('\n');
+    const raw = [RAW_HEAD].concat(rows.map(r => [
+      chain, r.hash, r.datetime, r.type, r.asset, r.contract, r.decimals, r.amount, r.dir, r.from, r.to,
+      r.hash ? (chain === 'base' ? 'https://basescan.org/tx/' : '') + r.hash : ''
+    ].map(csvEscape).join(','))).join('\n');
+
+    window.__koinly = koinly;
+    window.__raw = raw;
+    window.__name = `${chain}-${addr.slice(0, 10)}`;
+
+    $('n-rows').textContent = rows.length;
+    $('n-tok').textContent = rows.length - nativeCount;
+    $('n-native').textContent = nativeCount;
+    $('out').classList.add('show');
+    say(rows.length ? 'Done. ' + rows.length + ' rows ready.' : 'No transfers found for this address on ' + chain + '.', rows.length ? 'ok' : '');
+  } catch (e) {
+    say('Could not read this address: ' + e.message + '\nThe public explorer may be rate limiting you. Wait a minute and try again.', 'err');
+  } finally {
+    $('go').disabled = false;
+  }
+}
+
+function download(text, name) {
+  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+$('go').addEventListener('click', run);
+$('addr').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+$('dl-koinly').addEventListener('click', () => download(window.__koinly, window.__name + '.koinly.csv'));
+$('dl-raw').addEventListener('click', () => download(window.__raw, window.__name + '.raw.csv'));
+</script>
+</body>
+</html>
